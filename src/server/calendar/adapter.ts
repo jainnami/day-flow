@@ -4,12 +4,17 @@ import type { Interval } from "@/lib/types";
 import { AppError } from "../errors";
 export type CalendarChoice = { id: string; summary: string; primary?: boolean; description?: string; accessRole?: string };
 export type CalendarEvent = { id: string; start: string; end: string };
+export type EventSnapshot = { id: string; status?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string } };
+export interface CalendarSyncPort {
+  readEvent(calendarId: string, eventId: string): Promise<EventSnapshot | null>;
+  deleteEvent(calendarId: string, eventId: string): Promise<void>;
+}
 export interface CalendarPort {
   busy(calendarIds: string[], from: string, to: string): Promise<Interval[]>;
   findEvent(calendarId: string, eventId: string): Promise<CalendarEvent | null>;
   createEvent(calendarId: string, eventId: string, title: string, slot: Interval, taskId: string): Promise<CalendarEvent>;
 }
-export class CalendarAdapter implements CalendarPort {
+export class CalendarAdapter implements CalendarPort, CalendarSyncPort {
   constructor(private client: OAuth2Client, private transport: typeof fetch = fetch) {}
   private async call<T>(path: string, method = "GET", body?: unknown, allowMissing = false): Promise<T | null> {
     const token = await this.client.getAccessToken();
@@ -17,10 +22,11 @@ export class CalendarAdapter implements CalendarPort {
       method, headers: { Authorization: `Bearer ${token.token}`, "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(15000),
     });
-    if (response.status === 404 && allowMissing) return null;
+    if ([404, 410].includes(response.status) && allowMissing) return null;
     if (response.status === 401) throw new AppError("Google access expired. Reconnect your Google account.", 401);
     if (response.status === 403) throw new AppError("Google denied Calendar access. Check calendar permissions or reconnect with all requested permissions.", 403);
     if (!response.ok) throw new AppError("Google Calendar could not finish the request. Retry the same submission shortly.", 502);
+    if (response.status === 204) return null;
     return response.json() as Promise<T>;
   }
   async listCalendars(): Promise<CalendarChoice[]> {
@@ -62,6 +68,12 @@ export class CalendarAdapter implements CalendarPort {
     if (!event) return null;
     if (event.status === "cancelled" || !event.start?.dateTime || !event.end?.dateTime) throw new AppError("This submission's event was changed or deleted in Google. Review it in Google Calendar; it will not be recreated automatically.", 409);
     return { id: event.id, start: event.start.dateTime, end: event.end.dateTime };
+  }
+  async readEvent(calendarId: string, eventId: string): Promise<EventSnapshot | null> {
+    return this.call<EventSnapshot>(`/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, "GET", undefined, true);
+  }
+  async deleteEvent(calendarId: string, eventId: string): Promise<void> {
+    await this.call(`/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, "DELETE", undefined, true);
   }
   async createEvent(calendarId: string, eventId: string, title: string, slot: Interval, taskId: string): Promise<CalendarEvent> {
     const event = await this.call<{ id: string; start: { dateTime: string }; end: { dateTime: string } }>(`/calendars/${encodeURIComponent(calendarId)}/events`, "POST", {

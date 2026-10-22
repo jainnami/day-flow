@@ -43,4 +43,9 @@ describe("Google Calendar adapter contracts", () => {
   it("avoids recreating a cancelled event during retry recovery", async () => {
     await expect(new CalendarAdapter(client, async () => json({ id: "abc", status: "cancelled" })).findEvent("right-now", "abc")).rejects.toThrow("not be recreated");
   });
+  it("reads missing/deleted events for sync and tolerates repeated cleanup", async () => {
+    expect(await new CalendarAdapter(client, async () => json({}, 410)).readEvent("rn", "gone")).toBeNull();
+    await expect(new CalendarAdapter(client, async () => new Response(null, { status: 204 })).deleteEvent("rn", "event1")).resolves.toBeUndefined();
+    await expect(new CalendarAdapter(client, async () => json({}, 404)).deleteEvent("rn", "event1")).resolves.toBeUndefined();
+  });
 });

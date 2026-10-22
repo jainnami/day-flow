@@ -1,7 +1,8 @@
 import { readFile, readdir } from "node:fs/promises";
 import { Pool } from "pg";
+import { connectionStringForPg } from "../src/server/db/connection-string";
 if (!process.env.DATABASE_URL) throw new Error("Set DATABASE_URL in .env.local first.");
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({ connectionString: connectionStringForPg(process.env.DATABASE_URL) });
 const client = await pool.connect();
 try {
   await client.query("BEGIN");

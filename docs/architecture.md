@@ -1,5 +1,7 @@
 # Milestone 1 architecture
 
+This is the original Milestone 1 design record. For the current implementation, also read [Milestone 2 additions](milestone-2.md), which extend the schema, OAuth scopes and sync behavior described here.
+
 This plan follows the supplied PRD's Milestone 1 vertical slice. Its later flows describe the eventual product; they are not requirements to implement now. The user authorized this Calendar-only implementation and asked for the plan before code. The plan was presented in chat before implementation.
 
 ## One application with small modules

@@ -13,6 +13,6 @@ export async function GET() {
     const { codeVerifier, codeChallenge } = await client.generateCodeVerifierAsync();
     const jar = await cookies();
     jar.set("rn_oauth", JSON.stringify({ state, codeVerifier }), { ...cookieOptions(), maxAge: 600 });
-    return NextResponse.redirect(client.generateAuthUrl({ access_type: "offline", prompt: "consent", scope: SCOPES, state, code_challenge: codeChallenge, code_challenge_method: CodeChallengeMethod.S256 }));
+    return NextResponse.redirect(client.generateAuthUrl({ access_type: "offline", prompt: "consent", include_granted_scopes: true, scope: SCOPES, state, code_challenge: codeChallenge, code_challenge_method: CodeChallengeMethod.S256 }));
   } catch (error) { try { return NextResponse.redirect(`${appUrl()}/?auth=setup`); } catch { return failure(error); } }
 }

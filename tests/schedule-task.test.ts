@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eventIdFor, scheduleTask, type TaskRepository } from "../src/server/services/schedule-task";
 import type { CalendarPort } from "../src/server/calendar/adapter";
 import type { Task, TaskInput, User } from "../src/lib/types";
+import { taskSchema } from "../src/lib/validation";
 const now = "2026-10-20T18:00:00Z";
 const user: User = { id: randomUUID(), email: "student@example.com", timezone: "America/New_York", workStart: "09:00", workEnd: "18:00", sleepStart: "23:00", sleepEnd: "07:00", selectedCalendarIds: ["primary", "classes"], rightNowCalendarId: "right-now" };
 let stored: Task | null;
@@ -77,4 +78,25 @@ describe("Calendar-only vertical slice service", () => {
     await expect(scheduleTask({ ...input, deadlineLocal: "2027-10-19T18:00" }, user, repo, calendar, now)).rejects.toThrow("90 days");
   });
   it("uses different remote IDs for different users", () => expect(eventIdFor(user.id, input.requestId)).not.toBe(eventIdFor(randomUUID(), input.requestId)));
+  it("schedules a deadline-free task without inventing a due date", async () => {
+    vi.mocked(calendar.busy).mockResolvedValueOnce([{ start: now, end: "2026-10-20T19:00:00Z" }]).mockResolvedValueOnce([]);
+    const result = await scheduleTask({ ...input, deadlineLocal: null }, user, repo, calendar, now);
+    expect(result).toMatchObject({ status: "scheduled", dueAt: null, deadlineLocal: null, startAt: "2026-10-20T19:00:00.000Z" });
+    expect(stored?.dueAt).toBeNull(); expect(result.rationale).toContain("No deadline was set");
+    expect(calendar.busy).toHaveBeenNthCalledWith(1, expect.any(Array), now, new Date(Date.parse(now) + 90 * 86400000).toISOString());
+  });
+  it("keeps the same event on retry of a task with no deadline", async () => {
+    const request = { ...input, deadlineLocal: null };
+    const first = await scheduleTask(request, user, repo, calendar, now);
+    expect(await scheduleTask(request, user, repo, calendar, now)).toEqual(first); expect(calendar.createEvent).toHaveBeenCalledTimes(1);
+  });
+  it("reports no availability within the search window without manufacturing a deadline", async () => {
+    vi.mocked(calendar.busy).mockResolvedValue([{ start: now, end: "2027-01-20T18:00:00Z" }]);
+    const result = await scheduleTask({ ...input, deadlineLocal: null }, user, repo, calendar, now);
+    expect(result.status).toBe("unscheduled"); expect(result.dueAt).toBeNull(); expect(result.rationale).toContain("next 90 days"); expect(result.rationale).toContain("No deadline has been set"); expect(calendar.createEvent).not.toHaveBeenCalled();
+  });
+  it.each([null, "", undefined])("normalizes a missing deadline (%s) consistently", value => {
+    const parsed = taskSchema.parse({ ...input, deadlineLocal: value }); expect(parsed.deadlineLocal).toBeNull();
+  });
+  it("still rejects malformed nonempty deadlines", () => expect(taskSchema.safeParse({ ...input, deadlineLocal: "not-a-date" }).success).toBe(false));
 });

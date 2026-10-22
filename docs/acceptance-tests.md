@@ -1,5 +1,7 @@
 # Milestone 1 acceptance tests
 
+This checklist records the original Calendar-only slice. Current Google Tasks linkage and reconciliation checks are in [Milestone 2 acceptance checks](milestone-2.md#acceptance-checks).
+
 The PRD's full acceptance list spans multiple milestones. This checklist narrows it to the Calendar-only slice. In particular, Google Task linkage from AC01/AC03, completion, event synchronization, split allocation, LLM handling, and check-in behavior are deferred. A Calendar work event and a Google Task are distinct objects.
 
 ## Five acceptance scenarios

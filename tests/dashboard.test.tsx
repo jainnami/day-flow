@@ -7,7 +7,7 @@ const user: User = { id: "test-student", email: "student@example.com", timezone:
 const task: Task = { id: "one", userId: user.id, requestId: "request", title: "Finance", durationMinutes: 60, dueAt: "2026-10-21T22:00:00Z", deadlineLocal: "2026-10-21T18:00", status: "scheduled", rationale: "Earliest slot", createdAt: "2026-10-20T18:00:00Z", startAt: "2026-10-20T19:00:00Z", endAt: "2026-10-20T20:00:00Z", calendarId: "right-now", eventId: "event-one" };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 afterEach(() => { cleanup(); sessionStorage.clear(); vi.unstubAllGlobals(); });
-function dashboard() { return render(<Dashboard initialUser={user} initialTasks={[]} ready initialMessage="" />); }
+function dashboard() { return render(<Dashboard initialUser={user} initialTasks={[]} ready tasksConnected autoSync={false} initialMessage="" />); }
 function submit() {
   fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Finance" } });
   fireEvent.change(screen.getByLabelText(/Finish by/), { target: { value: "2026-10-21T18:00" } });
@@ -37,6 +37,16 @@ describe("Signed-in structured task form", () => {
     expect(sessionStorage.getItem(`rn_pending_${user.id}`)).toBeNull();
     expect(screen.getByRole("alert").textContent).toContain("future deadline");
   });
+  it("submits a blank optional deadline as null and displays No deadline", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(json({ task: { ...task, dueAt: null, deadlineLocal: null } })); vi.stubGlobal("fetch", fetchMock);
+    dashboard();
+    fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Finance" } });
+    const button = screen.getByRole("button", { name: /Find a time/ });
+    expect(button.closest("form")!.checkValidity()).toBe(true);
+    fireEvent.submit(button.closest("form")!);
+    await screen.findByText("No deadline");
+    expect(JSON.parse(fetchMock.mock.calls[0][1]!.body as string).deadlineLocal).toBeNull();
+  });
   it("shows unallocated work clearly", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(json({ task: { ...task, status: "unscheduled", startAt: null, endAt: null, calendarId: null, eventId: null, rationale: "All 60 minutes remain unallocated." } })));
     dashboard(); submit(); await screen.findByText("No slot available");
@@ -44,9 +54,9 @@ describe("Signed-in structured task form", () => {
   });
   it("can recover a persisted error task from a new tab", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(json({ task })); vi.stubGlobal("fetch", fetchMock);
-    render(<Dashboard initialUser={user} initialTasks={[{ ...task, status: "error", eventId: null, startAt: null, endAt: null }]} ready initialMessage="" />);
+    render(<Dashboard initialUser={user} initialTasks={[{ ...task, status: "error", eventId: null, startAt: null, endAt: null }]} ready tasksConnected autoSync={false} initialMessage="" />);
     fireEvent.click(screen.getByRole("button", { name: "Check this task’s status" }));
-    await screen.findByText("scheduled");
+    await screen.findByText("Scheduled");
     expect(JSON.parse(fetchMock.mock.calls[0][1]!.body as string).requestId).toBe(task.requestId);
   });
   it("saves selected calendar and hour settings", async () => {
@@ -56,5 +66,32 @@ describe("Signed-in structured task form", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(JSON.parse(fetchMock.mock.calls[1][1]!.body as string).selectedCalendarIds).toEqual(["primary", "classes"]);
+  });
+  it("syncs on app open and displays moved event timing and Google Task link", async () => {
+    const updated = { ...task, googleTaskId: "google1", googleTaskListId: "list1", sessionStatus: "moved_externally", startAt: "2026-10-20T21:00:00Z", endAt: "2026-10-20T22:00:00Z" };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ results: [{ id: task.id, error: null }], nextCursor: null })).mockResolvedValueOnce(json({ tasks: [updated] })); vi.stubGlobal("fetch", fetchMock);
+    render(<Dashboard initialUser={user} initialTasks={[task]} ready tasksConnected initialMessage="" />);
+    await screen.findByText("Work session: Moved in Google Calendar");
+    expect(screen.getByText(/Tue, Oct 20, 5:00 PM EDT/)).toBeTruthy(); expect(screen.getByRole("link", { name: "Open Google Tasks ↗" })).toBeTruthy();
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/sync");
+  });
+  it("follows sync cursors on manual refresh and displays completion", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ results: [], nextCursor: "next-page" })).mockResolvedValueOnce(json({ results: [], nextCursor: null })).mockResolvedValueOnce(json({ tasks: [{ ...task, status: "completed", sessionStatus: "canceled", googleTaskId: "google1" }] })); vi.stubGlobal("fetch", fetchMock);
+    render(<Dashboard initialUser={user} initialTasks={[task]} ready tasksConnected autoSync={false} initialMessage="" />);
+    fireEvent.click(screen.getByRole("button", { name: "Sync Google ↻" }));
+    await screen.findByText("Completed");
+    expect(JSON.parse(fetchMock.mock.calls[1][1]!.body as string)).toEqual({ cursor: "next-page" });
+    expect(screen.getByText(/Canceled after task closure/)).toBeTruthy();
+  });
+  it("asks existing Calendar-only users to reconnect for Tasks permission", () => {
+    render(<Dashboard initialUser={user} initialTasks={[]} ready tasksConnected={false} initialMessage="" />);
+    expect(screen.getByRole("link", { name: "reconnect Google and approve Tasks access" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: /Find a time/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+  it("shows a partial sync failure while preserving saved task results", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ results: [{ id: task.id, error: "Calendar could not be read" }], nextCursor: null })).mockResolvedValueOnce(json({ tasks: [task] })); vi.stubGlobal("fetch", fetchMock);
+    render(<Dashboard initialUser={user} initialTasks={[task]} ready tasksConnected autoSync={false} initialMessage="" />);
+    fireEvent.click(screen.getByRole("button", { name: "Sync Google ↻" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Calendar could not be read"); expect(screen.getByRole("heading", { name: "Finance" })).toBeTruthy();
   });
 });

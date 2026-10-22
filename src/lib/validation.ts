@@ -10,7 +10,8 @@ export const settingsSchema = z.object({
 export const taskSchema = z.object({
   requestId: z.uuid(), title: z.string().trim().min(1).max(200),
   durationMinutes: z.number().int().min(5).max(720),
-  deadlineLocal: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),
+  deadlineLocal: z.preprocess(value => value === "" || value === undefined ? null : value,
+    z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/).nullable()),
 });
 export function deadlineToUtc(local: string, timezone: string): string {
   try { return Temporal.PlainDateTime.from(local).toZonedDateTime(timezone, { disambiguation: "reject" }).toInstant().toString(); }

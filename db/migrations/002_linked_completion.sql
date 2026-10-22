@@ -1,0 +1,15 @@
+ALTER TABLE users ADD COLUMN right_now_task_list_id text;
+ALTER TABLE tasks DROP CONSTRAINT tasks_status_check;
+ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('pending','scheduled','unscheduled','error','completed','closed_deleted','needs_review'));
+ALTER TABLE tasks ADD COLUMN google_task_list_id text;
+ALTER TABLE tasks ADD COLUMN google_task_id text;
+ALTER TABLE tasks ADD COLUMN google_task_url text;
+ALTER TABLE tasks ADD COLUMN google_link_state text NOT NULL DEFAULT 'unlinked' CHECK (google_link_state IN ('unlinked','creating','linked','uncertain'));
+ALTER TABLE tasks ADD COLUMN google_link_attempt_id uuid;
+ALTER TABLE tasks ADD COLUMN completed_at timestamptz;
+ALTER TABLE tasks ADD COLUMN last_synced_at timestamptz;
+ALTER TABLE tasks ADD COLUMN sync_error text;
+ALTER TABLE tasks ADD CONSTRAINT tasks_google_link_pair CHECK ((google_task_id IS NULL) = (google_task_list_id IS NULL));
+CREATE UNIQUE INDEX tasks_google_object_idx ON tasks(user_id,google_task_list_id,google_task_id);
+ALTER TABLE work_sessions ADD COLUMN status text NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','elapsed','moved_externally','removed_externally','canceled'));
+ALTER TABLE work_sessions ADD COLUMN last_synced_at timestamptz;

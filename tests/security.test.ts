@@ -21,5 +21,5 @@ describe("Milestone 1 security boundaries", () => {
     expect(() => requireOrigin(new Request("http://localhost:3000/api/tasks", { headers: { origin: "http://localhost:3000" } }))).not.toThrow();
   });
   it("does not return raw internal errors", () => expect(publicError(new Error("postgresql://password@host/db"))).toEqual({ status: 500, message: expect.not.stringContaining("password") }));
-  it("requests Calendar-only least privilege scopes", () => { expect(SCOPES.some(s => s.includes("tasks"))).toBe(false); expect(SCOPES).not.toContain("https://www.googleapis.com/auth/calendar"); });
+  it("requests Tasks write access and narrow Calendar scopes", () => { expect(SCOPES).toContain("https://www.googleapis.com/auth/tasks"); expect(SCOPES).not.toContain("https://www.googleapis.com/auth/calendar"); });
 });

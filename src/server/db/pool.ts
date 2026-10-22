@@ -1,9 +1,10 @@
 import "server-only";
 import { Pool, type PoolClient } from "pg";
 import { required } from "../config";
+import { connectionStringForPg } from "./connection-string";
 const shared = globalThis as unknown as { rightNowPool?: Pool };
 export function pool() {
-  return shared.rightNowPool ??= new Pool({ connectionString: required("DATABASE_URL"), max: 5, connectionTimeoutMillis: 5000 });
+  return shared.rightNowPool ??= new Pool({ connectionString: connectionStringForPg(required("DATABASE_URL")), max: 5, connectionTimeoutMillis: 5000 });
 }
 export async function userTransaction<T>(userId: string, run: (db: PoolClient) => Promise<T>): Promise<T> {
   const db = await pool().connect();
