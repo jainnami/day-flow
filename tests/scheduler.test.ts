@@ -1,0 +1,27 @@
+import { describe, expect, it } from "vitest";
+import { earliestSlot, overlaps } from "../src/lib/scheduler";
+import { deadlineToUtc, settingsSchema, taskSchema } from "../src/lib/validation";
+import type { Settings } from "../src/lib/types";
+const settings: Settings = { timezone: "America/New_York", workStart: "09:00", workEnd: "18:00", sleepStart: "23:00", sleepEnd: "07:00", selectedCalendarIds: ["primary"] };
+const run = (patch: Partial<Parameters<typeof earliestSlot>[0]> = {}) => earliestSlot({ now: "2026-10-20T18:00:00Z", dueAt: "2026-10-21T22:00:00Z", durationMinutes: 60, settings, busy: [], ...patch });
+describe("Milestone 1 deterministic scheduling", () => {
+  it("avoids a 2–3 PM busy event", () => expect(run({ busy: [{ start: "2026-10-20T18:00:00Z", end: "2026-10-20T19:00:00Z" }] })?.start).toBe("2026-10-20T19:00:00.000Z"));
+  it("chooses the earliest feasible minute", () => expect(run({ now: "2026-10-20T18:00:14Z" })?.start).toBe("2026-10-20T18:01:00.000Z"));
+  it("handles overlapping and unsorted busy intervals", () => expect(run({ busy: [{ start: "2026-10-20T18:30:00Z", end: "2026-10-20T20:00:00Z" }, { start: "2026-10-20T18:00:00Z", end: "2026-10-20T19:00:00Z" }] })?.start).toBe("2026-10-20T20:00:00.000Z"));
+  it("permits touching boundaries and ending exactly at the deadline", () => expect(run({ dueAt: "2026-10-20T19:00:00Z" })?.end).toBe("2026-10-20T19:00:00.000Z"));
+  it("never schedules after the deadline", () => expect(run({ dueAt: "2026-10-20T18:59:00Z" })).toBeNull());
+  it("does not split a task across smaller gaps", () => expect(run({ dueAt: "2026-10-20T19:30:00Z", busy: [{ start: "2026-10-20T18:30:00Z", end: "2026-10-20T19:00:00Z" }] })).toBeNull());
+  it("moves to the next working day", () => expect(run({ now: "2026-10-20T21:30:00Z" })?.start).toBe("2026-10-21T13:00:00.000Z"));
+  it("protects overnight sleep even inside working hours", () => expect(run({ now: "2026-10-20T09:00:00Z", settings: { ...settings, workStart: "05:00" } })?.start).toBe("2026-10-20T11:00:00.000Z"));
+  it("protects daytime sleep", () => expect(run({ settings: { ...settings, sleepStart: "14:00", sleepEnd: "16:00" } })?.start).toBe("2026-10-20T20:00:00.000Z"));
+  it("handles all-day busy intervals", () => expect(run({ busy: [{ start: "2026-10-20T04:00:00Z", end: "2026-10-21T04:00:00Z" }] })?.start).toBe("2026-10-21T13:00:00.000Z"));
+  it("returns no slot for a past deadline", () => expect(run({ dueAt: "2026-10-19T18:00:00Z" })).toBeNull());
+  it("keeps 9 AM local after spring DST", () => expect(run({ now: "2026-03-08T05:00:00Z", dueAt: "2026-03-09T00:00:00Z" })?.start).toBe("2026-03-08T13:00:00.000Z"));
+  it("keeps 9 AM local after autumn DST", () => expect(run({ now: "2026-11-01T04:00:00Z", dueAt: "2026-11-02T00:00:00Z" })?.start).toBe("2026-11-01T14:00:00.000Z"));
+  it("supports a timezone with a half-hour offset", () => expect(run({ now: "2026-10-20T00:00:00Z", settings: { ...settings, timezone: "Asia/Kolkata" } })?.start).toBe("2026-10-20T03:30:00.000Z"));
+  it("rejects nonexistent and ambiguous local deadlines", () => { expect(() => deadlineToUtc("2026-03-08T02:30", settings.timezone)).toThrow(); expect(() => deadlineToUtc("2026-11-01T01:30", settings.timezone)).toThrow(); });
+  it("converts local deadlines explicitly", () => expect(deadlineToUtc("2026-10-20T15:00", settings.timezone)).toBe("2026-10-20T19:00:00Z"));
+  it("rejects invalid duration and empty title", () => expect(taskSchema.safeParse({ requestId: "x", title: " ", durationMinutes: -1, deadlineLocal: "tomorrow" }).success).toBe(false));
+  it("rejects invalid timezone and working hours", () => expect(settingsSchema.safeParse({ ...settings, timezone: "Mars", workEnd: "08:00" }).success).toBe(false));
+  it("treats touching events as non-overlapping", () => expect(overlaps({ start: "2026-10-20T18:00Z", end: "2026-10-20T19:00Z" }, { start: "2026-10-20T19:00Z", end: "2026-10-20T20:00Z" })).toBe(false));
+});
